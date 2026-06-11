@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>Redirecting…</title>
+  <style>
+    html, body { height: 100%; margin: 0; }
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: #f6f7f8;
+      color: #444;
+    }
+    .box { text-align: center; }
+    .spinner {
+      width: 28px; height: 28px;
+      margin: 0 auto 14px;
+      border: 3px solid #d7dadd;
+      border-top-color: #25d366; /* WhatsApp green */
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    p { font-size: 15px; margin: 0; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <div class="spinner" aria-hidden="true"></div>
+    <p>Redirecting…</p>
+  </div>
+
+  <script>
+    // Uninstall redirect for the WhatsApp Web Customizer extension.
+    //
+    // Chrome runs no extension code at uninstall — the only hook is
+    // setUninstallURL(), which points here. This page:
+    //   1. Reads the anonymous analytics_distinct_id from the URL.
+    //   2. Fires an `extension_uninstalled` event to PostHog (keepalive
+    //      fetch, so it survives the navigation away from this page).
+    //   3. Forwards to the Google Form with the id pre-filled, so the
+    //      survey field is populated even before the user types.
+    //
+    // Values mirror analytics.js — keep them in sync if they change there.
+    (function () {
+      "use strict";
+
+      var POSTHOG_HOST = "https://eu.i.posthog.com";
+      var POSTHOG_API_KEY = "phc_D7eF9i6oXNgCTRHZ9VPHJNs5AaBudskFF36har3UYyPW";
+      var EVENT_NAME = "extension_uninstalled";
+
+      // Google Form (unchanged from analytics.js). usp=pp_url + the prefill
+      // entry token records the id as an actual form response field.
+      var FORM_URL =
+        "https://docs.google.com/forms/d/e/1FAIpQLSc92IabrxttJJ1dmLj6QbejXlkHffnd8lxjy1lVjDvALQCkrQ/viewform?usp=pp_url";
+
+      // Same param name used on both legs (incoming URL and outgoing form).
+      var USERID_PARAM = "entry.1444409856";
+
+      // Hard cap so the user never waits on a slow/blocked network. keepalive
+      // means the POST keeps going after we navigate away, so redirecting
+      // early does not drop the event.
+      var REDIRECT_TIMEOUT_MS = 1200;
+
+      var distinctId =
+        new URLSearchParams(window.location.search).get(USERID_PARAM) || "unknown";
+
+      var redirected = false;
+      function redirectToForm() {
+        if (redirected) return;
+        redirected = true;
+        var dest = new URL(FORM_URL);
+        dest.searchParams.set(USERID_PARAM, distinctId);
+        window.location.replace(dest.toString());
+      }
+
+      // Whichever comes first: the capture call settles, or the timeout fires.
+      var timer = setTimeout(redirectToForm, REDIRECT_TIMEOUT_MS);
+
+      function done() {
+        clearTimeout(timer);
+        redirectToForm();
+      }
+
+      try {
+        fetch(POSTHOG_HOST + "/capture/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          keepalive: true, // CRITICAL: outlives the redirect navigation.
+          body: JSON.stringify({
+            api_key: POSTHOG_API_KEY,
+            event: EVENT_NAME,
+            distinct_id: distinctId,
+            properties: {
+              $lib: "chrome-extension-uninstall-redirect",
+              source: "uninstall_redirect",
+            },
+            timestamp: new Date().toISOString(),
+          }),
+        })
+          .then(done)
+          .catch(done);
+      } catch (e) {
+        // Never let a scripting error strand the user on this page.
+        done();
+      }
+    })();
+  </script>
+</body>
+</html>
