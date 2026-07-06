@@ -39,11 +39,13 @@
     //
     // Chrome runs no extension code at uninstall — the only hook is
     // setUninstallURL(), which points here. This page:
-    //   1. Reads the anonymous analytics_distinct_id from the URL.
-    //   2. Fires an `extension_uninstalled` event to PostHog (keepalive
-    //      fetch, so it survives the navigation away from this page).
-    //   3. Forwards to the Google Form with the id pre-filled, so the
-    //      survey field is populated even before the user types.
+    //   1. Reads the anonymous PostHog distinct_id (`did`) and extension
+    //      version (`v`) from the URL. `did` is the SAME id that stamps every
+    //      normal event, so the uninstall is linkable to a known user.
+    //   2. Fires an `extension_uninstalled` event to PostHog with that
+    //      distinct_id (keepalive fetch, so it survives the navigation away).
+    //   3. Forwards to the Google Form with the id pre-filled, so the survey
+    //      field is populated even before the user types.
     //
     // Values mirror analytics.js — keep them in sync if they change there.
     (function () {
@@ -53,28 +55,31 @@
       var POSTHOG_API_KEY = "phc_D7eF9i6oXNgCTRHZ9VPHJNs5AaBudskFF36har3UYyPW";
       var EVENT_NAME = "extension_uninstalled";
 
-      // Google Form (unchanged from analytics.js). usp=pp_url + the prefill
-      // entry token records the id as an actual form response field.
+      // Google Form (unchanged). usp=pp_url + the prefill entry token records
+      // the id as an actual form response field.
       var FORM_URL =
         "https://docs.google.com/forms/d/e/1FAIpQLSc92IabrxttJJ1dmLj6QbejXlkHffnd8lxjy1lVjDvALQCkrQ/viewform?usp=pp_url";
 
-      // Same param name used on both legs (incoming URL and outgoing form).
-      var USERID_PARAM = "entry.1444409856";
+      // Google Form field token for the id (outgoing prefill leg only).
+      var FORM_USERID_FIELD = "entry.1444409856";
 
       // Hard cap so the user never waits on a slow/blocked network. keepalive
       // means the POST keeps going after we navigate away, so redirecting
       // early does not drop the event.
       var REDIRECT_TIMEOUT_MS = 1200;
 
-      var distinctId =
-        new URLSearchParams(window.location.search).get(USERID_PARAM) || "unknown";
+      var params = new URLSearchParams(window.location.search);
+      // `did` is the current param; fall back to the legacy `entry.1444409856`
+      // for any uninstall URL set by an extension version <1.1.18.
+      var distinctId = params.get("did") || params.get(FORM_USERID_FIELD) || "unknown";
+      var version = params.get("v") || null;
 
       var redirected = false;
       function redirectToForm() {
         if (redirected) return;
         redirected = true;
         var dest = new URL(FORM_URL);
-        dest.searchParams.set(USERID_PARAM, distinctId);
+        dest.searchParams.set(FORM_USERID_FIELD, distinctId);
         window.location.replace(dest.toString());
       }
 
@@ -94,10 +99,11 @@
           body: JSON.stringify({
             api_key: POSTHOG_API_KEY,
             event: EVENT_NAME,
-            distinct_id: distinctId,
+            distinct_id: distinctId, // same id PostHog knows the user by
             properties: {
               $lib: "chrome-extension-uninstall-redirect",
               source: "uninstall_redirect",
+              extension_version: version,
             },
             timestamp: new Date().toISOString(),
           }),
